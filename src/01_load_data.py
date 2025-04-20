@@ -43,8 +43,8 @@ df.head()
 df['TotalPrice'] = df['Quantity'] * df['Price']
 
 # Step 2: Calculating Net Revenue (CLV) per customer — includes purchases and refunds
-customer_clv = df.groupby('Customer ID')['TotalPrice'].sum().reset_index()
-customer_clv.columns = ['Customer ID', 'CLV']  # Rename for clarity
+total_spent = df.groupby('Customer ID')['TotalPrice'].sum().reset_index()
+total_spent.columns = ['Customer ID', 'TotalSpent']  # Rename for clarity
 
 # Step 3: Calculating Net Quantity per customer
 df['NetQuantity'] = df.groupby('Customer ID')['Quantity'].transform('sum')
@@ -54,7 +54,7 @@ df_unique = df.drop_duplicates(subset='Customer ID')
 df_unique = df_unique[['Customer ID', 'NetQuantity']]
 
 # results
-print(customer_clv.head())
+print(total_spent.head())
 print(df_unique.head())
 
 ###################### Saving cleaned dataset ##################################
@@ -65,7 +65,7 @@ customer_summary = df.groupby('Customer ID').agg({
     'TotalPrice': 'sum'
 }).rename(columns={
     'Quantity': 'NetQuantity',
-    'TotalPrice': 'CLV'
+    'TotalPrice': 'TotalSpent'
 }).reset_index()
 
 # Save customer-level summary
