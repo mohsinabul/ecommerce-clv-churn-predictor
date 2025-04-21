@@ -178,7 +178,6 @@ print(customer_summary.isnull().sum())
 median_value = customer_summary['Avg_Days_Between_Purchases'].median()
 customer_summary['Avg_Days_Between_Purchases'] = customer_summary['Avg_Days_Between_Purchases'].fillna(median_value)
 
-
 # Save the enriched customer_summary as a CSV file
 customer_summary.to_excel('data/data/processed/customer_summary_enriched.xlsx', index=False)
 
