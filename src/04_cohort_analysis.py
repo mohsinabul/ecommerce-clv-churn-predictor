@@ -82,3 +82,6 @@ ax.set_ylabel('Cohort Month\n', fontsize=12, labelpad=10)
 plt.xticks(rotation=0, ha='right', fontsize=10)
 plt.tight_layout()
 plt.show()
+
+# Saving file to create tableau dashboard
+retention.to_csv('data/data/processed/cohort_retention.csv')
