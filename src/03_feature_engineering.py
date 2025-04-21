@@ -111,8 +111,73 @@ print(customer_summary.head())
 # Churn Flag: 1 if Recency > 120 days, else 0
 customer_summary['ChurnFlag'] = customer_summary['Recency'].apply(lambda x: 1 if x > 120 else 0)
 
+
+############################### Adding new features #####################################
+# Calculating Recency-Frequency-Monetary (RFM) Score
+customer_summary['RFM_Score'] = (customer_summary['Recency'] / customer_summary['Recency'].max()) + \
+                                (customer_summary['Frequency'] / customer_summary['Frequency'].max()) + \
+                                (customer_summary['MonetaryValue'] / customer_summary['MonetaryValue'].max())
+
+def classify_rfm(row):
+    if row['RFM_Score'] > 1.4:
+        return 'Champion'
+    elif row['RFM_Score'] > 1.2:
+        return 'Loyal'
+    elif row['RFM_Score'] > 0.8:
+        return 'At Risk'
+    else:
+        return 'Lost'
+
+customer_summary['Customer_Segment'] = customer_summary.apply(classify_rfm, axis=1)
+
+######################## Adding more features for better analysis in future ###########################
+
+# average basket size (avg. spent per order)
+customer_summary['Avg_Basket_Size'] = customer_summary['TotalSpent'] / customer_summary['Frequency']
+
+# Customer Lifetime Value (CLV) 
+customer_summary['CLV'] = customer_summary['MonetaryValue'] * customer_summary['Tenure']
+
+# Last Purchase Gap
+second_last_purchase_date = df.groupby('Customer ID')['InvoiceDate'].apply(lambda x: x.nlargest(2).iloc[-1])
+last_purchase_gap = (last_purchase_date - second_last_purchase_date).dt.days
+last_purchase_gap = last_purchase_gap.where(last_purchase_gap >= 0, None)  
+customer_summary['LastPurchaseGap'] = customer_summary['Customer ID'].map(last_purchase_gap)
+
+# Purchase Frequency in Last 30 Days
+last_30_days = df[df['InvoiceDate'] > (last_invoice_date_in_data - pd.Timedelta(days=30))]
+purchase_frequency_last_30_days = last_30_days.groupby('Customer ID')['Invoice'].nunique()
+customer_summary['PurchaseFrequencyLast30Days'] = customer_summary['Customer ID'].map(purchase_frequency_last_30_days).fillna(0)
+
+# Flag active customers (those who made a purchase in the last 30 days)
+customer_summary['ActiveInLast30Days'] = customer_summary['PurchaseFrequencyLast30Days'].apply(lambda x: 1 if x > 0 else 0)
+
 # updated DataFrame
 customer_summary.head()
+
+# Verify Data Types
+print("Data Types:")
+print(customer_summary.dtypes)
+
+# Check for missing values
+print("\nMissing Values:")
+print(customer_summary.isnull().sum())
+
+# For date columns, let's ensure they are in the correct format if needed
+# If you have any date columns, such as 'FirstPurchaseDate', 'LastPurchaseDate', ensure they are datetime
+if 'FirstPurchaseDate' in customer_summary.columns:
+    customer_summary['FirstPurchaseDate'] = pd.to_datetime(customer_summary['FirstPurchaseDate'], errors='coerce')
+    
+if 'LastPurchaseDate' in customer_summary.columns:
+    customer_summary['LastPurchaseDate'] = pd.to_datetime(customer_summary['LastPurchaseDate'], errors='coerce')
+
+# After conversion, check if there are any missing values again for dates
+print("\nMissing Values After Date Conversion:")
+print(customer_summary.isnull().sum())
+
+median_value = customer_summary['Avg_Days_Between_Purchases'].median()
+customer_summary['Avg_Days_Between_Purchases'] = customer_summary['Avg_Days_Between_Purchases'].fillna(median_value)
+
 
 # Save the enriched customer_summary as a CSV file
 customer_summary.to_excel('data/data/processed/customer_summary_enriched.xlsx', index=False)
