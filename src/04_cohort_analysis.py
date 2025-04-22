@@ -81,7 +81,10 @@ ax.set_xlabel('\nMonths Since First Purchase', fontsize=12, labelpad=10)
 ax.set_ylabel('Cohort Month\n', fontsize=12, labelpad=10)
 plt.xticks(rotation=0, ha='right', fontsize=10)
 plt.tight_layout()
+plt.savefig('visuals/cohort_analysis/retention_heatmap.png', dpi=300, bbox_inches='tight')
 plt.show()
+
+
 
 # Saving file to create tableau dashboard
 retention.to_csv('data/data/processed/cohort_retention.csv')
