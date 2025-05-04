@@ -6,142 +6,193 @@ Created on Sun Apr 20 22:14:45 2025
 """
 
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import silhouette_score
 
-# Load transaction data
+# Load datasets
 df = pd.read_pickle('data/data/processed/cleaned_data.pkl')
-# Load the customer summary data
 customer_summary = pd.read_pickle('data/data/processed/customer_summary.pkl')
 
-# Preview the datasets
+# Preview data
 print("Transaction Data:")
 print(df.head())
 
 print("\nCustomer Summary:")
 print(customer_summary.head())
-df.dtypes
 
-###################### calculating the Recency feature ##########################
+########################## Feature Engineering Starts #############################
 
-# latest purchase date for each customer (i.e., recency)
-last_purchase_date = df.groupby('Customer ID')['InvoiceDate'].max()
-
-# Get the last purchase date from the dataset (the most recent invoice date)
+# Most recent invoice date in the dataset
 last_invoice_date_in_data = df['InvoiceDate'].max()
 
-# Calculate recency (days since the last purchase relative to the last date in the data)
-recency = (last_invoice_date_in_data - last_purchase_date).dt.days
+########################## Recency ##########################
 
-# Add the recency column to the customer_summary
+# Latest purchase date per customer
+last_purchase_date = df.groupby('Customer ID')['InvoiceDate'].max()
+
+# Recency = days since last purchase
+recency = (last_invoice_date_in_data - last_purchase_date).dt.days
 customer_summary['Recency'] = customer_summary['Customer ID'].map(recency)
 
-# Display the updated customer summary with recency
-print(customer_summary.head())
+########################## Frequency ##########################
 
-############################### Frequency  ####################################
-# Calculating frequency (number of unique invoices per customer)
+# Number of unique invoices per customer
 frequency = df.groupby('Customer ID')['Invoice'].nunique()
-
-# Adding the frequency column to the customer_summary DataFrame
 customer_summary['Frequency'] = customer_summary['Customer ID'].map(frequency)
 
-# Display the updated customer_summary with Frequency
-print(customer_summary.head())
+########################## Monetary Value ##########################
 
-############################ Monetary Value (Average Order Value) #############
-# Average Order Value (Monetary Value) for each customer
+# Average Order Value = TotalSpent / Frequency
 customer_summary['MonetaryValue'] = customer_summary['TotalSpent'] / customer_summary['Frequency']
 
-# Display the updated customer_summary
-print(customer_summary.head())
+########################## Tenure ##########################
 
-################################### Tenure ####################################
+# First purchase date per customer
+first_purchase_per_customer = df.groupby('Customer ID')['InvoiceDate'].min()
 
-# first transaction date for each customer
-first_purchase_per_customer = df.groupby('Customer ID')['InvoiceDate'].min().reset_index()
+# Tenure = days between first purchase and latest data date
+tenure = (last_invoice_date_in_data - first_purchase_per_customer).dt.days
+customer_summary['Tenure'] = customer_summary['Customer ID'].map(tenure)
 
-# Tenure as the difference between the first transaction date and the latest transaction date
-first_purchase_per_customer['Tenure'] = (last_invoice_date_in_data - first_purchase_per_customer['InvoiceDate']).dt.days
+########################## Avg Days Between Purchases ##########################
 
-# Tenure into the customer summary dataframe
-customer_summary = pd.merge(customer_summary, first_purchase_per_customer[['Customer ID', 'Tenure']], on='Customer ID', how='left')
-
-# Check the result
-print(customer_summary.head())
-
-################### Avg Days Between Purchases for each customer ##############
-
-# Calculating Avg Days Between Purchases
-# Grouping by 'Customer ID' and calculate the first and last purchase dates
 customer_transaction_dates = df.groupby('Customer ID')['InvoiceDate'].agg(['min', 'max', 'count'])
-
-# Calculating the number of days between the first and last purchase
 customer_transaction_dates['Days_Between'] = (customer_transaction_dates['max'] - customer_transaction_dates['min']).dt.days
-
-# Calculating average days between purchases
 customer_transaction_dates['Avg_Days_Between_Purchases'] = customer_transaction_dates['Days_Between'] / (customer_transaction_dates['count'] - 1)
 
-# Merging the Avg Days Between Purchases
-customer_summary = customer_summary.merge(customer_transaction_dates[['Avg_Days_Between_Purchases']], on='Customer ID', how='left')
+# Map Avg Days Between Purchases
+customer_summary = customer_summary.merge(
+    customer_transaction_dates[['Avg_Days_Between_Purchases']],
+    on='Customer ID',
+    how='left'
+)
 
-# updated dataframe
-print(customer_summary.head())
+########################## Return Rate ##########################
 
-################################ Return Rate ##################################
-
-# Creating ReturnFlag column
+# ReturnFlag: 1 if Quantity < 0
 df['ReturnFlag'] = df['Quantity'].apply(lambda x: 1 if x < 0 else 0)
 
-# Grouping by Customer ID to count number of returns
+# Total returns per customer
 returns = df.groupby('Customer ID')['ReturnFlag'].sum()
 
-# number of positive transactions
+# Total purchases (positive quantity) per customer
 purchases = df[df['Quantity'] > 0].groupby('Customer ID')['Invoice'].count()
 
-# Calculating return rate
+# Return Rate = returns / purchases
 return_rate = (returns / purchases).fillna(0)
+customer_summary['ReturnRate'] = customer_summary['Customer ID'].map(return_rate)
 
-# Updated customer_summary
-customer_summary['ReturnRate'] = customer_summary['Customer ID'].map(return_rate).fillna(0)
+########################## Churn Flag ##########################
 
-# Preview
-print(customer_summary.head())
+# Churn if Recency > 90 days
+customer_summary['ChurnFlag'] = customer_summary['Recency'].apply(lambda x: 1 if x > 90 else 0)
 
-############################## ChurnFlag ######################################
+########################## RFM Score and Segments ##########################
 
-# Churn Flag: 1 if Recency > 120 days, else 0
-customer_summary['ChurnFlag'] = customer_summary['Recency'].apply(lambda x: 1 if x > 120 else 0)
-
-
-############################### Adding new features #####################################
-# Calculating Recency-Frequency-Monetary (RFM) Score
+# Normalize RFM features and add
 customer_summary['RFM_Score'] = (customer_summary['Recency'] / customer_summary['Recency'].max()) + \
                                 (customer_summary['Frequency'] / customer_summary['Frequency'].max()) + \
                                 (customer_summary['MonetaryValue'] / customer_summary['MonetaryValue'].max())
 
-def classify_rfm(row):
-    if row['RFM_Score'] > 1.4:
-        return 'Champion'
-    elif row['RFM_Score'] > 1.2:
-        return 'Loyal'
-    elif row['RFM_Score'] > 0.8:
-        return 'At Risk'
-    else:
-        return 'Lost'
-
-customer_summary['Customer_Segment'] = customer_summary.apply(classify_rfm, axis=1)
-
-######################## Adding more features for better analysis in future ###########################
-
-# average basket size (avg. spent per order)
-customer_summary['Avg_Basket_Size'] = customer_summary['TotalSpent'] / customer_summary['Frequency']
-
-# Customer Lifetime Value (CLV) 
+# Customer Lifetime Value (CLV)
 customer_summary['CLV'] = customer_summary['MonetaryValue'] * customer_summary['Tenure']
+# 2. Remove outliers using IQR method
+Q1 = customer_summary['CLV'].quantile(0.25)
+Q3 = customer_summary['CLV'].quantile(0.75)
+IQR = Q3 - Q1
+lower_bound = Q1 - 1.5 * IQR
+upper_bound = Q3 + 1.4 * IQR
+
+# Filter outliers
+customer_summary = customer_summary[
+    (customer_summary['CLV'] >= lower_bound) & 
+    (customer_summary['CLV'] <= upper_bound)
+]
+
+# 3. Basic segmentation by CLV percentiles
+customer_summary['CLV_Segment'] = pd.qcut(
+    customer_summary['CLV'],
+    q=3,
+    labels=['Low', 'Medium', 'High']
+)
+
+# 4. Simple visualization
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=customer_summary, x='CLV_Segment', y='CLV')
+plt.title('CLV Distribution by Segment')
+plt.show()
+
+# 5. Basic segment analysis
+segment_stats = customer_summary.groupby('CLV_Segment').agg({
+    'CLV': ['mean', 'count'],
+    'MonetaryValue': 'mean',
+    'Tenure': 'mean',
+    'Frequency': 'mean'
+})
+
+print("Segment Statistics:")
+print(segment_stats.round(2))
+
+# RMF features
+rfm_features = customer_summary[['Recency', 'Frequency', 'MonetaryValue']].copy()
+
+# Scale features
+scaler = StandardScaler()
+rfm_scaled = scaler.fit_transform(rfm_features)
+
+# KMeans clustering
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+customer_summary['Segment'] = kmeans.fit_predict(rfm_scaled)
+
+# cluster statistics
+cluster_stats = customer_summary.groupby('Segment').agg({
+    'CLV': 'mean',
+    'MonetaryValue': 'mean',
+    'Frequency': 'mean',
+    'Recency': 'mean'
+}).round(2).sort_values(by='CLV', ascending=False)
+
+print("Cluster Statistics:")
+print(cluster_stats)
+
+# segment names dynamically based on CLV ranking
+
+ranked_segments = cluster_stats.reset_index().copy()
+ranked_segments['Segment_Name'] = ['High Value Customers', 'Mid Value Customers', 'Low Value Customers']
+segment_name_map = dict(zip(ranked_segments['Segment'], ranked_segments['Segment_Name']))
+
+customer_summary['Segment_Name'] = customer_summary['Segment'].map(segment_name_map)
+
+# Visualization
+plt.figure(figsize=(12, 8))
+sns.scatterplot(data=customer_summary, 
+                x='Frequency', 
+                y='MonetaryValue',
+                hue='Segment_Name',
+                palette=['#2ca02c', '#ff7f0e', '#1f77b4'],
+                size='CLV',
+                sizes=(20, 200),
+                alpha=0.7)
+
+plt.title('Customer Segments by RFM with CLV Bubble Size', pad=20)
+plt.xlabel('Purchase Frequency', labelpad=10)
+plt.ylabel('Monetary Value ($)', labelpad=10)
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.grid(True, linestyle='--', alpha=0.3)
+plt.tight_layout()
+plt.show()
+########################## Additional Features ##########################
+
+# Average Basket Size = TotalSpent / Frequency
+customer_summary['Avg_Basket_Size'] = customer_summary['TotalSpent'] / customer_summary['Frequency']
 
 # Last Purchase Gap
 second_last_purchase_date = df.groupby('Customer ID')['InvoiceDate'].apply(lambda x: x.nlargest(2).iloc[-1])
 last_purchase_gap = (last_purchase_date - second_last_purchase_date).dt.days
-last_purchase_gap = last_purchase_gap.where(last_purchase_gap >= 0, None)  
+last_purchase_gap = last_purchase_gap.where(last_purchase_gap >= 0, None)
 customer_summary['LastPurchaseGap'] = customer_summary['Customer ID'].map(last_purchase_gap)
 
 # Purchase Frequency in Last 30 Days
@@ -149,38 +200,41 @@ last_30_days = df[df['InvoiceDate'] > (last_invoice_date_in_data - pd.Timedelta(
 purchase_frequency_last_30_days = last_30_days.groupby('Customer ID')['Invoice'].nunique()
 customer_summary['PurchaseFrequencyLast30Days'] = customer_summary['Customer ID'].map(purchase_frequency_last_30_days).fillna(0)
 
-# Flag active customers (those who made a purchase in the last 30 days)
+# Active in Last 30 Days Flag
 customer_summary['ActiveInLast30Days'] = customer_summary['PurchaseFrequencyLast30Days'].apply(lambda x: 1 if x > 0 else 0)
 
-# updated DataFrame
-customer_summary.head()
+# Last Invoice Date per customer (adding for future analysis if needed)
+last_purchase = df.groupby('Customer ID')['InvoiceDate'].max().reset_index()
+last_purchase.columns = ['Customer ID', 'LastInvoiceDate']
 
-# Verify Data Types
-print("Data Types:")
-print(customer_summary.dtypes)
+customer_summary = customer_summary.merge(
+    last_purchase,
+    on='Customer ID',
+    how='left'
+)
 
-# Check for missing values
-print("\nMissing Values:")
-print(customer_summary.isnull().sum())
+########################## Handling Missing Values ##########################
 
-# For date columns, let's ensure they are in the correct format if needed
-# If you have any date columns, such as 'FirstPurchaseDate', 'LastPurchaseDate', ensure they are datetime
-if 'FirstPurchaseDate' in customer_summary.columns:
-    customer_summary['FirstPurchaseDate'] = pd.to_datetime(customer_summary['FirstPurchaseDate'], errors='coerce')
-    
-if 'LastPurchaseDate' in customer_summary.columns:
-    customer_summary['LastPurchaseDate'] = pd.to_datetime(customer_summary['LastPurchaseDate'], errors='coerce')
-
-# After conversion, check if there are any missing values again for dates
-print("\nMissing Values After Date Conversion:")
-print(customer_summary.isnull().sum())
-
+# Fill missing Avg_Days_Between_Purchases with median
 median_value = customer_summary['Avg_Days_Between_Purchases'].median()
 customer_summary['Avg_Days_Between_Purchases'] = customer_summary['Avg_Days_Between_Purchases'].fillna(median_value)
 
-# Save the enriched customer_summary as a CSV file
+# Convert any date columns if necessary
+if 'FirstPurchaseDate' in customer_summary.columns:
+    customer_summary['FirstPurchaseDate'] = pd.to_datetime(customer_summary['FirstPurchaseDate'], errors='coerce')
+
+if 'LastInvoiceDate' in customer_summary.columns:
+    customer_summary['LastInvoiceDate'] = pd.to_datetime(customer_summary['LastInvoiceDate'], errors='coerce')
+
+########################## Final Checks ##########################
+
+print("Data Types:")
+print(customer_summary.dtypes)
+
+print("\nMissing Values:")
+print(customer_summary.isnull().sum())
+
+########################## Save the enriched summary ##########################
+
 customer_summary.to_excel('data/data/processed/customer_summary_enriched.xlsx', index=False)
-
-
-
 
